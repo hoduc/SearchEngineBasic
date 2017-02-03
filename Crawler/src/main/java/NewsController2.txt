@@ -1,0 +1,402 @@
+package mypackage;
+
+import java.lang.String;
+import java.util.Arrays;
+import java.util.List;
+import java.util.ArrayList;
+import java.util.Set;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Map.Entry;
+import java.util.HashMap;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
+import java.util.Locale;
+import java.io.Writer;
+import java.io.OutputStreamWriter;
+import java.io.FileOutputStream;
+import java.io.BufferedWriter;
+import java.io.IOException;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+//Apache
+import org.apache.http.impl.EnglishReasonPhraseCatalog;
+
+//Craw4j specific
+import edu.uci.ics.crawler4j.crawler.WebCrawler;
+import edu.uci.ics.crawler4j.crawler.CrawlConfig;
+import edu.uci.ics.crawler4j.crawler.CrawlController;
+import edu.uci.ics.crawler4j.crawler.Page;
+import edu.uci.ics.crawler4j.url.WebURL;
+import edu.uci.ics.crawler4j.fetcher.PageFetcher;
+import edu.uci.ics.crawler4j.robotstxt.RobotstxtConfig;
+import edu.uci.ics.crawler4j.robotstxt.RobotstxtServer;
+
+
+
+public class NewsController2{
+    public static final Logger logger = LoggerFactory.getLogger( NewsController.class );
+    
+    public static List<NewsController> Instances = new ArrayList<>( );
+
+    
+     //program commands
+    public static final String prog = "NewsCrawler";
+    public static final String options = "prog [1 link]";
+
+    //Crawler config
+    public static final int MAX_PAGE_FETCH = 10000;
+    public static final int MAX_DEPTH_CRAWL = 16;
+    public static final int NUM_CRAWLER = 7;
+
+    
+    //Report
+    public static final String USER_AGENT = "Mozilla/5.0 (iPad; U; CPU OS 3_2_1 like Mac OS X; en-us) AppleWebKit/531.21.10 (KHTML, like Gecko) Mobile/7B405";
+    public static final String CRAWL_REPORT = "CrawlReport_";
+    public static final String FETCH_PREFIX = "fetch_";
+    public static final String VISIT_PREFIX = "visit_";
+    public static final String URLS_PREFIX = "urls_";
+    public static final int KB = 1024;
+    public static final int _10KB = 10 * KB;
+    public static final int _100KB = 10 * _10KB;
+    public static final int MB = 1024 * KB;
+
+    
+    public static class FetchAgg{
+	String Url;
+	int StatusCode;
+
+	public FetchAgg( String Url,  int StatusCode ) {
+	    this.Url = Url;
+	    this.StatusCode = StatusCode;
+	}
+
+	//for dumping csv
+	@Override
+	public String toString(){
+	    return Url + "," + StatusCode;
+	}
+     };
+
+     public static class VisitAgg{
+	String Url;
+	long Size;
+	int OutLinks;
+	String ContentType;
+
+	public VisitAgg( String Url, long Size, int OutLinks, String ContentType ) {
+	    this.Url = Url;
+	    this.Size = Size;
+	    this.OutLinks = OutLinks;
+	    this.ContentType = ContentType;
+	}
+
+	@Override
+	public String toString() {
+	    return Url + "," + Size + "," + OutLinks + "," + ContentType;
+	}
+     };
+
+     public static class UrlAgg{
+	String Url;
+	boolean OK;
+
+	public UrlAgg( String Url, boolean OK ){
+	    this.Url = Url;
+	    this.OK = OK;
+	}
+
+	@Override
+	public String toString(){
+	    return Url + "," + OK;
+	}
+     };
+     //dummy class to just dump csv
+     public static class Agg{
+	private String[] aggs;
+	public Agg( String[] aggs ){
+	    this.aggs = aggs;
+	}
+
+	@Override
+	public String toString(){
+	    String s = "";
+	    for( String agg : aggs )
+		s += agg + ",";
+	    s = s.substring( 0, s.length( ) - 1 );
+	    return s;
+	}
+     }
+
+    
+   
+    public List<String> DOMAINS = new ArrayList<>();
+    public String CrawlSubject = "dummy";
+    private final List<FetchAgg> fetches = new ArrayList<>();
+    private final List<FetchAgg> fetchSuccs = new ArrayList<>();
+    private final List<FetchAgg> fetchAbrts = new ArrayList<>();
+    private final List<FetchAgg> fetchFails = new ArrayList<>();
+    private final List<VisitAgg> visiteds = new ArrayList<>();
+    private final List<UrlAgg>   links    = new ArrayList<>();
+    private final ConcurrentHashMap<String, Integer>    uniqueLinks         = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Integer>    uniqueResidentLinks = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Integer>    uniqueNonResidentLinks = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Integer, Integer> statusCodeFreqs = new ConcurrentHashMap<>();
+    
+    
+    private final int[] fileSizesCount = new int[]{
+	0, //< 1KB - 1000B       [0]
+	0, //< 10KB - 10,000B    [1]
+	0, //< 100KB - 100,000B  [2]
+	0, //< 1MB - 1,000,000B  [3]
+	0, //>= 1MB - 1,000,000B [4]
+    };
+    
+    /*Map<Integer, Integer> fileSizesCountMap = new HashMap<>(){
+    	    {
+    		put( KB, 0 );
+    		put( _10KB, 0 );
+    		put( _100KB, 0 );
+    		put( MB, 0 );
+    		put( -1, 0 ); //>=1MB
+    	    }
+    };
+    */
+
+    private final ConcurrentHashMap<String, Integer> contentTypeFreqs = new ConcurrentHashMap<>();
+
+    private synchronized void UpdateSizeCount( long fileSize ) {
+	int index = 4;
+	//Hah, mathy
+	////get coresponding index : log( n / 1000 ) + 1
+	// if ( fileSize < 1000 ) {
+	//     index = 0;
+	// }else if ( fileSize < MB ) {
+	//     index = (int)(Math.log10( fileSize/ 10000 ) + 1 );
+	// }
+	if ( fileSize < KB ) {
+	    index = 0;
+	}else if ( fileSize < _10KB ) {
+	    index = 1;
+	}else if ( fileSize < _100KB ) {
+	    index = 2;
+	}else if ( fileSize < MB ) {
+	    index = 3;
+	}else{
+	    index = 4;
+	}
+	fileSizesCount[ index ]++;
+    }
+
+    private void UpdateStatusCodeCount( int statusCode ) {
+	Integer statusCodeCount = statusCodeFreqs.get( statusCode );
+	if ( statusCodeCount == null ) {
+	    statusCodeFreqs.put( statusCode, 1 );
+	}else {
+	    statusCodeFreqs.put( statusCode, statusCodeCount + 1 );
+	}
+    }
+    
+    private void UpdateContentTypeCount ( String contentType ) {
+	Integer contentTypeCount = contentTypeFreqs.get( contentType );
+	if ( contentTypeCount == null ) {
+	    contentTypeFreqs.put( contentType, 1 );
+	}else{
+	    contentTypeFreqs.put( contentType, contentTypeCount + 1 );
+	}
+    }
+
+    private void UpdateUniqueLink( UrlAgg urlAgg ) {
+	if ( !uniqueLinks.containsKey( urlAgg.Url ) ) {
+	    uniqueLinks.put( urlAgg.Url, 1 );
+	}
+    }
+
+    private void UpdateUniqueNonResidentLink( UrlAgg urlAgg ) {
+	if ( !urlAgg.OK && !uniqueNonResidentLinks.containsKey( urlAgg.Url ) ) {
+	    uniqueNonResidentLinks.put( urlAgg.Url,  1 );
+	}
+    }
+
+    private void UpdateUniqueResidentLink( UrlAgg urlAgg ) {
+	if ( urlAgg.OK && !uniqueResidentLinks.containsKey( urlAgg.Url ) ) {
+	    uniqueResidentLinks.put( urlAgg.Url,  1 );
+	}
+    }
+    
+    
+    
+    public void AddFetch( FetchAgg fetchAgg ) {
+	fetches.add( fetchAgg );
+	UpdateStatusCodeCount( fetchAgg.StatusCode );
+    }
+
+    public void AddFetchSuccess( FetchAgg fetchAgg ) {
+	fetchSuccs.add( fetchAgg );
+    }
+
+    public void AddFetchAbort( FetchAgg fetchAgg ) {
+	fetchAbrts.add( fetchAgg );
+    }
+
+    public void AddFetchFail( FetchAgg fetchAgg ) {
+	fetchFails.add( fetchAgg );
+    }
+
+    public void AddVisited( VisitAgg visitAgg ) {
+	visiteds.add( visitAgg );
+	UpdateSizeCount( visitAgg.Size );
+	UpdateContentTypeCount( visitAgg.ContentType );
+    }
+
+    public static boolean isResidentInDomain( String testDomain, List<String> domains ) {
+	return domains.contains( testDomain );
+    }
+    
+    public void AddLink( WebURL url ) {
+
+	UrlAgg urlAgg = new UrlAgg( url.getURL( ), isResidentInDomain( url.getDomain( ), DOMAINS ) );
+	links.add( urlAgg );
+	UpdateUniqueLink( urlAgg );
+	UpdateUniqueNonResidentLink ( urlAgg );
+	UpdateUniqueResidentLink( urlAgg );
+	
+    }
+    
+   
+
+    private static void writeList( String filename, List<? extends Object> contents ) throws Exception {
+	Writer writer = new BufferedWriter( new OutputStreamWriter( new FileOutputStream( filename ) ) );
+	for( Object o : contents ) {
+	    writer.write( o.toString() + "\n" );
+	}
+	writer.close();
+    }
+
+    private static void writemdTitle( Writer writer, String title ) throws Exception {
+	writer.write( title + "\n" );
+	for( int i = 0 ; i < title.length(); i++ )
+	    writer.write( "=" );
+	writer.write( "\n" );
+    }
+
+    private static void writeStatusCode( Writer writer, Map<Integer, Integer> sCount ) throws Exception {
+	for( Map.Entry<Integer, Integer> entry : sCount.entrySet( ) ) {
+	    writer.write( EnglishReasonPhraseCatalog.INSTANCE.getReason( entry.getKey( ) , Locale.ENGLISH ) + " : " + entry.getValue( ) + "\n" );
+	}
+    }
+
+    private static void writeContentTypes( Writer writer, Map<String, Integer> ctCount ) throws Exception {
+	for( Map.Entry<String, Integer> entry : ctCount.entrySet( ) ) {
+	    writer.write( entry.getKey( ) + " : " + entry.getValue( ) + "\n" );
+	}
+	
+    }
+    
+    
+    private void writeReport( String filename ) throws Exception {
+	
+	Writer writer = new BufferedWriter( new OutputStreamWriter( new FileOutputStream( filename ) ) );
+	writer.write( "Name : Duc Ho\n" );
+	writer.write( "USC ID : 8944025003\n" );
+	writer.write( "News site crawled : " + CrawlSubject + "\n\n" );
+	//fetch statistic
+	writemdTitle( writer, "Fetch Statistics" );
+	writer.write( "# fetches attempted :" + fetches.size( ) + "\n" );
+	writer.write( "# fetches succeeded :" + fetchSuccs.size( ) + "\n" );
+	writer.write( "# fetches aborted :"   + fetchAbrts.size( ) + "\n" );
+	writer.write( "# fetches failed :"    + fetchFails.size( ) + "\n" );
+	writer.write( "\n\n" );
+	
+	//outgoing links
+	writemdTitle( writer, "Outgoing URLs : \n" );
+	writer.write( "Total URLs extracted : " + links.size( ) + "\n" );
+	writer.write( "# unique URLs extracted :" + uniqueLinks.keySet( ).size( ) + "\n" );
+	writer.write( "# unique URLS within [" + CrawlSubject + "] : " + uniqueResidentLinks.keySet( ).size( ) + "\n" );
+	writer.write( "# unique URLs outside [" + CrawlSubject + "] : " + uniqueNonResidentLinks.keySet( ).size( ) + "\n" );
+	writer.write( "\n\n");
+
+	//status
+	writemdTitle( writer, "Status Codes : \n" );
+	writeStatusCode( writer, statusCodeFreqs );
+	writer.write( "\n\n" );
+	writemdTitle( writer, "File Sizes : \n" );
+	writer.write( "< 1KB : " + fileSizesCount[0] + "\n" );
+	writer.write( "1KB ~ < 10KB : " + fileSizesCount[1] + "\n" );
+	writer.write( "10KB ~ < 100KB : " + fileSizesCount[2] + "\n" );
+	writer.write( "100KB ~ < 1MB : " + fileSizesCount[3] + "\n" );
+	writer.write( ">= 1MB : " + fileSizesCount[4] + "\n" );
+	writemdTitle( writer, "Content Types : \n" );
+	writeContentTypes( writer, contentTypeFreqs );
+	writer.write( "\n\n" );
+	writer.close();
+    }
+    
+    //Configuration : controller to crawl passed in links
+    public void ConfigAndRun( String...seeds ) throws Exception {
+	String crawlSubject = "";
+	for( String seed : seeds ) {
+	    //System.out.println( "seed:" + seed );
+	    WebURL wurl = new WebURL();
+	    wurl.setURL( seed );
+	    DOMAINS.add( wurl.getDomain( ) );
+	    crawlSubject += wurl.getDomain( ) + "_";
+	}
+
+	if ( !crawlSubject.equals( "" ) )
+	    CrawlSubject = crawlSubject.replace(".", "_");
+
+	//logger.info("CrawlSubject:" + crawler.CrawlSubject );
+	//crawl config
+	CrawlConfig config = new CrawlConfig();
+	config.setMaxPagesToFetch( MAX_PAGE_FETCH );
+	config.setMaxDepthOfCrawling( MAX_DEPTH_CRAWL );
+	config.setUserAgentString( USER_AGENT );
+	config.setIncludeBinaryContentInCrawling( true ); //png, pdf,etc
+	//extra
+	config.setCrawlStorageFolder( CrawlSubject );
+	
+	
+	PageFetcher pageFetcher = new PageFetcher( config );
+	RobotstxtConfig robotstxtConfig = new RobotstxtConfig( );
+	RobotstxtServer robotstxtServer = new RobotstxtServer( robotstxtConfig, pageFetcher );
+	
+	CrawlController controller = new CrawlController( config, pageFetcher, robotstxtServer );
+	for( String seed : seeds ) {
+	    controller.addSeed( seed );
+	}
+
+	//if it gets here, it is done!!!
+	controller.start( NewsCrawler.class, NUM_CRAWLER );
+	//write the csv and stuff
+	//logger.info( "curdir:" + System.getProperty( "user.dir" ) );
+	//logger.info("BEFORE EXIT!!!" + CrawlSubject );
+	writeList( CrawlSubject + "/" + FETCH_PREFIX + CrawlSubject + ".csv", fetches );
+	writeList( CrawlSubject + "/" + VISIT_PREFIX + CrawlSubject + ".csv", visiteds );
+	writeList( CrawlSubject + "/" + URLS_PREFIX + CrawlSubject + ".csv", links );
+	//calculate the statistics
+	writeReport( CrawlSubject + "/" + CRAWL_REPORT + CrawlSubject + ".txt" );
+    }
+
+    public static String DisplayOption(){
+	return options;
+    }
+    
+
+    public static NewsController GetInstance( ) {
+	NewsController newsController = Instances.get( Instances.size( ) - 1 );
+	return newsController;
+    }
+    
+    public static void main( String[] args ) throws Exception {
+	if ( args.length  != 1 ) {
+	    System.out.println( DisplayOption() );
+	}else{
+	    NewsController controller = new NewsController( );
+	    Instances.add( controller );
+	    controller.ConfigAndRun( args );
+	}
+    }
+}

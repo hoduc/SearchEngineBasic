@@ -1,0 +1,11 @@
+# Root logger option
+log4j.rootLogger=WARN, DEBUG, INFO, fileout
+
+# Direct log messages to file
+log4j.appender.fileout=org.apache.log4j.RollingFileAppender
+log4j.appender.fileout.File=crawl_${current.date}.log
+log4j.appender.fileout.ImmediateFlush=true
+log4j.appender.fileout.Threshold=debug
+log4j.appender.fileout.Append=false
+log4j.appender.fileout.layout=org.apache.log4j.PatternLayout
+log4j.appender.fileout.layout.conversionPattern=%5p | %d | %m%n

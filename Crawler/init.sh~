@@ -1,0 +1,37 @@
+#!/usr/bin/sh
+
+GRADLE_SRC=~/.gradle/rapper/dists/gradle-2.10-all/a4w5fzrkeut1ox71xslb49gst/gradle-2.10/bin
+
+#!/bin/bash
+ 
+OPTIND=1 
+ 
+DEST=${PWD}
+NAME="dummy"
+TITLE="Hello"
+ 
+echo "Hello World. Path is ${DEST}"
+ 
+while getopts ":d:n:t:" opt; do
+ 
+    case $opt in
+    d)
+        echo "Setting destination to $OPTARG" >&2
+        DEST=$OPTARG
+        ;;
+    n)
+        echo "name of the html is set to $OPTARG" >&2
+        TITLE=$OPTARG
+        ;;
+    t)
+        echo "title of the html is set to $OPTARG" >&2
+        NAME=$OPTARG
+        ;;
+     
+    \?)
+        echo "Invalid option: -$OPTARG" >&2
+        exit 1
+        ;;
+   
+    esac      
+done
