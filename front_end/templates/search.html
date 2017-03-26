@@ -1,0 +1,55 @@
+<!doctype html>
+<title>Welcome to Duc Search</title>
+<link rel=stylesheet type=text/css href="{{ url_for('static', filename='style.css') }}" />
+<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" integrity="sha384-BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u" crossorigin="anonymous">
+{% block body %}
+<div class="row">
+  <h1 class="col-md-offset-4">Welcome to Duc's {{title}} News Search</h1>
+</div>
+<div class="row">
+  <form action="{{ url_for( src ) }}" method=post class="form-inline col-md-offset-5">
+    <div class="form-group">
+      <input type="text" name="q" class="form-control" value="{{q}}">
+    </div>
+    <button type="submit" class="btn btn-default">Search</button>
+  </form>
+</div>
+<br><br>
+{% if error %}<p class=error><strong>Error:</strong> {{ error }}{% endif %}
+<ol type="1" class=entries>
+  {% for entry in entries %}
+  <li>
+    <div class="post">
+      <div class="content">
+	 <div class="img-rounded thumb">
+	   {% if entry.img %}
+	      <img src="{{entry.img}}" width="100"/>
+	   {% else %}
+	      <img src="{{url_for('static',filename='empty_bg.png')}}" width="100" />
+	   {% endif %}
+	 </div>
+	 <a target="_blank" href="{{entry.link}}">{{entry.title}}</a>
+         <p>{{entry.description}}</p>
+	 <p>{{entry.id}}</p>
+       </div>
+    </div>
+  </li>
+  <br><br>
+  {% endfor %}
+</ol>
+<div class="row">
+   <div class="col-md-offset-5">
+     {% if pages %}
+        1
+        {% for p in pages %}
+	   {% if p != "..." %}
+	      <a href="{{ url_for( 'not_implemented' ) }}">{{p}}</a>
+	   {% else %}
+	      {{p}}
+	   {% endif %}
+        {% endfor %}
+     {% endif %}
+   </div>
+</div>
+{% endblock %}
+

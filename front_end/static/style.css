@@ -1,0 +1,28 @@
+.post{
+    display: block;
+}
+
+.thumb{
+    float: left;
+    margin-right: 10px;
+    clear : both
+}
+
+.thumb img{
+    display: block;
+}
+
+.content{
+    margin-left: 0px;
+    overflow: auto;
+    display: block;
+}
+
+#center{
+    width: 100px;
+    margin: auto;
+    top: 0;
+    bottom: 0;
+    right: 0;
+    left: 0;
+}

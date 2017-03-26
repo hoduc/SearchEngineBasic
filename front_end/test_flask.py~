@@ -1,0 +1,63 @@
+from flask import Flask
+from flask import request
+from flask import render_template
+
+import urllib
+import urllib2
+
+
+app = Flask(__name__)
+
+def add_k_v(d1,k1,d2,k2):
+    if k1 in d1 and k1 not in d2:
+        d2[k2] = d1[k1]
+
+def add_ks_vs(d1,k1s,d2,k2s):
+    for i in range(len(k1s)):
+        if k1s[i] in d1:
+            d2[k2s[i]] = d1[k1s[i]][0]
+    return d2
+            
+def parse_entries( docs ):
+    numFound = docs['response']['numFound']
+    print (numFound, " documents found. ")
+
+    entries = []
+    if numFound != "0":
+        for bulk_info in docs['response']['docs']:
+            entries.append(add_ks_vs(bulk_info,["link", "title", "description", "og_image"], {}, ["link", "title", "description", "img" ]))
+    return int(numFound), entries
+
+def get_indexed_docs( query, core):
+    solr_query_url = "http://localhost:8983/solr/"
+    quoted_query = urllib.quote( query )
+    r_url = solr_query_url + core + "/select?indent=on&wt=python&q=" + quoted_query
+    print("url:", r_url)
+    return eval(urllib2.urlopen(r_url).read())
+
+@app.route('/')
+def hello_world():
+    return 'hello world'
+
+@app.route('/hello/<string:name>')
+def hello(name=None):
+    #hello
+    return render_template( 'hello.html', name=name )
+
+@app.route('/search', methods=['POST', 'GET'])
+def search():
+    error = None
+    entries = []
+    npages = None
+    if request.method == 'POST':
+        q = str(request.form["q"])
+        print("searchword:", q)
+        if not q:
+            error = "Please type something"
+        #send request to solr and parse the response into a list
+        npages, entries = parse_entries( get_indexed_docs( q, "sr_core" ) )
+    return render_template( 'search.html', error=error, entries=entries, pages=npages)
+
+@app.route('/not_implemented')
+def not_implemented():
+    return "Not implemented"
